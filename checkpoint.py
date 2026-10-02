@@ -142,6 +142,15 @@ def secrets_before_checkpoint(text: str, job_id: str) -> tuple[bool, list[str]]:
     return (not findings, findings)
 
 
+def started_with(saved) -> str:
+    """What this job started from: the saved setup of the runner it was copied from, as the runner
+    host recorded it for that runner, or a fresh runner."""
+    if not isinstance(saved, dict) or not saved.get("commit"):
+        return "no saved setup: this job started from a fresh runner"
+    at = f", saved {saved['capturedAt']}" if saved.get("capturedAt") else ""
+    return f"this job started with the setup saved from {str(saved['commit'])[:12]}{at}"
+
+
 # ---- the exchange ----------------------------------------------------------------------------------
 
 def main() -> int:
@@ -175,11 +184,7 @@ def main() -> int:
         log(f"setup saved from {commit}; later jobs of this repository start with it")
         summary(f"**Checkpoint:** setup saved from `{commit}`. Later jobs of this repository start with it.")
     elif kind == "noted":
-        saved = reply.get("parent") or {}
-        if saved.get("commit"):
-            log(f"this job started with the setup saved from {str(saved['commit'])[:12]}")
-        else:
-            log("no saved setup yet: this job started from a fresh runner")
+        log(started_with(reply.get("parent")))
         if reply.get("reason"):
             log(f"not saved now: {reply['reason']}")
         if not ok:

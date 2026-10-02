@@ -27,6 +27,7 @@ Your workspace is not saved. `actions/checkout` fetches it fresh in every job an
 - Only runs of the repository's **default branch**: pushes, manual runs and scheduled runs. Pull requests, including ones from forks, never save anything. They start from the setup saved from the default branch, and their own setup steps install whatever their changes need.
 - After a new commit lands on the default branch, the next run of that commit saves a fresh setup. Until then, jobs start from the previous one, which only means a little more work in their setup steps.
 - Without this step, nothing changes: jobs start from a fresh runner, as before.
+- In every job the step logs which saved setup that job started with: its commit and when it was saved.
 
 ## Secrets
 

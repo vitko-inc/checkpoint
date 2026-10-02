@@ -50,6 +50,14 @@ def main():
             sys.exit(1)
     ok, findings = checkpoint.secrets_before_checkpoint(CLEAN, "other-job")
     check("an unknown job refuses", ok, False)
+    said = checkpoint.started_with({"commit": "0123456789abcdef0123456789abcdef01234567", "capturedAt": "2026-10-02T10:37:42Z"})
+    if said != "this job started with the setup saved from 0123456789ab, saved 2026-10-02T10:37:42Z":
+        print(f"FAIL: started_with: {said}")
+        sys.exit(1)
+    for nothing in (None, {}, {"commit": ""}, "x"):
+        if "fresh runner" not in checkpoint.started_with(nothing):
+            print(f"FAIL: started_with({nothing!r})")
+            sys.exit(1)
     print("ALL CHECKPOINT CHECKS PASSED")
 
 

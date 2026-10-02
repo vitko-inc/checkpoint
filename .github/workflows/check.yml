@@ -1,0 +1,53 @@
+name: Check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  identifier-scan:
+    name: no internal identifiers
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - name: Scan
+        env:
+          IDENTIFIER_PATTERNS: ${{ secrets.IDENTIFIER_PATTERNS }}
+        run: |
+          if [ -z "$IDENTIFIER_PATTERNS" ]; then
+            echo "::notice::The identifier scan runs on maintainers' pushes (its pattern list is not available here)."
+            exit 0
+          fi
+          bash .github/scan.sh .
+
+  no-op-elsewhere:
+    name: does nothing on other runners (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - id: checkpoint
+        uses: ./
+      - name: The job goes on
+        shell: bash
+        run: echo "after the checkpoint"
+
+  secrets-rule:
+    name: the secrets rule
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - name: Unit checks
+        run: python3 tests/test_checkpoint.py

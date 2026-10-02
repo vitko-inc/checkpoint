@@ -1,0 +1,36 @@
+name: Vitko Runners checkpoint
+description: >-
+  Marks the end of your job's setup. On Vitko Runners, runs of your default branch save the setup
+  done before this step, and later jobs start with it, so their setup steps finish quickly. On
+  other runners it does nothing.
+author: Vitko Runners
+branding:
+  icon: fast-forward
+  color: green
+
+inputs:
+  token:
+    description: >-
+      Used only to read this run's workflow file when the repository is not checked out, to check
+      that no step before the checkpoint uses a secret.
+    required: false
+    default: ${{ github.token }}
+  timeout-seconds:
+    description: How long to wait for the runner to save the setup before going on without it.
+    required: false
+    default: "120"
+
+runs:
+  using: composite
+  steps:
+    - name: Checkpoint
+      shell: bash
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+      run: |
+        if command -v python3 >/dev/null 2>&1; then
+          python3 "$GITHUB_ACTION_PATH/checkpoint.py"
+        else
+          echo "checkpoint: not running on Vitko Runners: nothing to do"
+        fi

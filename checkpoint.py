@@ -25,7 +25,6 @@ HOST_CID = 2
 HOST_PORT = 5207
 CONNECT_TIMEOUT_S = 3
 MAX_LINE = 1 << 16
-SECRET_REF = re.compile(r"secrets\s*(\.\s*(?!GITHUB_TOKEN\b)[A-Za-z_][A-Za-z0-9_]*|\[)|toJSON\(\s*secrets\s*\)", re.I)
 CHECKPOINT_USES = re.compile(r"^vitko-inc/checkpoint(@|$)", re.I)
 
 
@@ -78,68 +77,116 @@ def connect() -> socket.socket | None:
 
 # ---- the secrets rule ----------------------------------------------------------------------------
 
-def workflow_text() -> str | None:
-    """This run's workflow file at this run's commit."""
-    ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
-    sha = os.environ.get("GITHUB_WORKFLOW_SHA") or os.environ.get("GITHUB_SHA", "")
-    prefix = repo + "/"
-    if not ref.startswith(prefix) or "@" not in ref or not sha:
-        return None
-    path = ref[len(prefix):].split("@", 1)[0]
-    workspace = os.environ.get("GITHUB_WORKSPACE", "")
-    if workspace and os.path.isdir(os.path.join(workspace, ".git")):
+# Any secret other than GITHUB_TOKEN, in dot or bracket form, and the whole secrets context.
+SECRET_REF = re.compile(
+    r"secrets\s*(\.\s*(?!GITHUB_TOKEN\b)[A-Za-z_][A-Za-z0-9_]*|\[\s*(?!['\"]GITHUB_TOKEN['\"]\s*\])[^\]]*\])"
+    r"|toJSON\(\s*secrets\s*\)", re.I)
+MAX_DEPTH = 3
+
+
+def read_file(repo: str, path: str, ref: str) -> str | None:
+    """A workflow file of `repo` at `ref`: through the API with the step's token, else from the
+    checked-out repository when it is that repository."""
+    token = os.environ.get("INPUT_TOKEN", "")
+    api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+    if token:
+        request = urllib.request.Request(f"{api}/repos/{repo}/contents/{path}?ref={ref}", headers={
+            "Authorization": f"Bearer {token}", "Accept": "application/vnd.github.raw+json"})
         try:
-            return subprocess.run(["git", "-C", workspace, "show", f"{sha}:{path}"], check=True,
+            with urllib.request.urlopen(request, timeout=20) as response:
+                return response.read().decode()
+        except (OSError, ValueError):
+            pass
+    workspace = os.environ.get("GITHUB_WORKSPACE", "")
+    if repo == os.environ.get("GITHUB_REPOSITORY") and workspace and os.path.isdir(os.path.join(workspace, ".git")):
+        try:
+            return subprocess.run(["git", "-C", workspace, "show", f"{ref}:{path}"], check=True,
                                   capture_output=True, text=True, timeout=20).stdout
         except (OSError, subprocess.SubprocessError):
             pass
-    token = os.environ.get("INPUT_TOKEN", "")
-    api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
-    if not token:
-        return None
-    request = urllib.request.Request(f"{api}/repos/{repo}/contents/{path}?ref={sha}", headers={
-        "Authorization": f"Bearer {token}", "Accept": "application/vnd.github.raw+json"})
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return response.read().decode()
-    except (OSError, ValueError):
-        return None
+    return None
 
 
-def secrets_before_checkpoint(text: str, job_id: str) -> tuple[bool, list[str]]:
-    """(ok, findings): whether the workflow's env, this job's env, or any step before this one
-    references a secret other than GITHUB_TOKEN."""
+def secret_refs(where: str, value) -> list[str]:
+    return [f"{where}: {m.group(0)}" for m in SECRET_REF.finditer(json.dumps(value))]
+
+
+def called_workflow(uses: str, repo: str, ref: str) -> tuple[str, str, str] | None:
+    """(repo, path, ref) of a reusable workflow a job calls, or None."""
+    uses = uses.strip()
+    if uses.startswith("./"):
+        return repo, uses[2:], ref
+    match = re.fullmatch(r"([\w.-]+/[\w.-]+)/(\.github/workflows/[^@]+\.ya?ml)@(.+)", uses)
+    return (match.group(1), match.group(2), match.group(3)) if match else None
+
+
+def check_job(read, repo: str, path: str, ref: str, job_id: str, depth: int = 0) -> tuple[str, list[str]]:
+    """("ok" | "secrets" | "unverified", findings) for job `job_id` as run from workflow `path`.
+
+    The job is either in that workflow, or in a reusable workflow it calls (GitHub names the
+    caller's file in GITHUB_WORKFLOW_REF and the called job in GITHUB_JOB). Several called
+    workflows may have a job of that name: all of them are checked, and every one must pass.
+    """
     try:
-        import yaml  # noqa: PLC0415  (present on GitHub-hosted and Vitko runner images)
+        import yaml  # noqa: PLC0415
     except ImportError:
-        yaml = None
-    if yaml is None:
-        # No parser: look at everything up to the first checkpoint step, conservatively.
-        head = re.split(r"uses:\s*['\"]?vitko-inc/checkpoint", text, maxsplit=1, flags=re.I)[0]
-        found = sorted({m.group(0) for m in SECRET_REF.finditer(head)})
-        return (not found, [f"before this step: {name}" for name in found])
+        return "unverified", ["no YAML parser on this runner"]
+    text = read(repo, path, ref)
+    if text is None:
+        return "unverified", [f"could not read {path}"]
     try:
         doc = yaml.safe_load(text) or {}
     except yaml.YAMLError:
-        return False, ["the workflow file could not be read"]
-    job = (doc.get("jobs") or {}).get(job_id)
-    if not isinstance(job, dict) or "steps" not in job:
-        return False, [f"job {job_id!r} not found in the workflow"]
-    findings = []
+        return "unverified", [f"could not parse {path}"]
+    jobs = doc.get("jobs") or {}
+    job = jobs.get(job_id)
+    if isinstance(job, dict) and "steps" in job:
+        findings = secret_refs("workflow env", doc.get("env")) + secret_refs("job env", job.get("env"))
+        for index, step in enumerate(job.get("steps") or []):
+            if isinstance(step, dict) and CHECKPOINT_USES.match(str(step.get("uses", ""))):
+                break
+            name = (step or {}).get("name") or (step or {}).get("uses") or f"step {index + 1}"
+            findings += secret_refs(f"step {name!r}", step)
+        return ("secrets" if findings else "ok"), findings
+    if depth >= MAX_DEPTH:
+        return "unverified", [f"job {job_id!r} not found"]
+    verdicts = []
+    for caller_id, caller in jobs.items():
+        if not isinstance(caller, dict) or not isinstance(caller.get("uses"), str):
+            continue
+        target = called_workflow(caller["uses"], repo, ref)
+        if target is None:
+            continue
+        status, findings = check_job(read, *target, job_id, depth + 1)
+        if status == "unverified" and any("not found" in f for f in findings):
+            continue  # this called workflow has no such job
+        # Inputs are passed in plain: a secret given as an input is a secret before the step.
+        passed = secret_refs(f"job {caller_id!r} with", caller.get("with"))
+        verdicts.append(("secrets" if passed else status, passed + findings))
+    if not verdicts:
+        return "unverified", [f"job {job_id!r} not found in {path} or the workflows it calls"]
+    for wanted in ("secrets", "unverified"):
+        hit = [f for status, found in verdicts if status == wanted for f in found]
+        if hit:
+            return wanted, hit
+    return "ok", []
 
-    def check(where: str, value) -> None:
-        for match in SECRET_REF.finditer(json.dumps(value)):
-            findings.append(f"{where}: {match.group(0)}")
 
-    check("workflow env", doc.get("env"))
-    check("job env", job.get("env"))
-    for index, step in enumerate(job.get("steps") or []):
-        if isinstance(step, dict) and CHECKPOINT_USES.match(str(step.get("uses", ""))):
-            break
-        name = (step or {}).get("name") or (step or {}).get("uses") or f"step {index + 1}"
-        check(f"step {name!r}", step)
-    return (not findings, findings)
+def secrets_before_checkpoint(text: str, job_id: str) -> tuple[bool, list[str]]:
+    """(ok, findings) for a single workflow's text (kept for tests and simple callers)."""
+    status, findings = check_job(lambda *_: text, "", "workflow.yml", "", job_id)
+    return status == "ok", findings
+
+
+def this_job() -> tuple[str, list[str]]:
+    """The secrets rule for the running job."""
+    ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    sha = os.environ.get("GITHUB_WORKFLOW_SHA") or os.environ.get("GITHUB_SHA", "")
+    if not ref.startswith(repo + "/") or "@" not in ref or not sha:
+        return "unverified", ["this run's workflow is not known"]
+    path = ref[len(repo) + 1:].split("@", 1)[0]
+    return check_job(read_file, repo, path, sha, os.environ.get("GITHUB_JOB", ""))
 
 
 def started_with(saved) -> str:
@@ -156,18 +203,18 @@ def started_with(saved) -> str:
 def main() -> int:
     sock = connect()
     if sock is None:
-        log("not running on Vitko Runners: nothing to do")
+        if os.environ.get("RUNNER_NAME", "").startswith("vitko-"):
+            log("this runner started without a saved setup and cannot save one: nothing to do")
+        else:
+            log("not running on Vitko Runners: nothing to do")
         return 0
     timeout = float(os.environ.get("INPUT_TIMEOUT_SECONDS") or 120)
-    text = workflow_text()
-    if text is None:
-        ok, findings = False, ["the workflow file could not be read"]
-    else:
-        ok, findings = secrets_before_checkpoint(text, os.environ.get("GITHUB_JOB", ""))
+    status, findings = this_job()
+    ok = status == "ok"
     try:
         sock.settimeout(timeout)
         lines = Lines(sock)
-        lines.send({"type": "hello", "protocol": PROTOCOL, "secrets": {"ok": ok, "findings": findings[:20]}})
+        lines.send({"type": "hello", "protocol": PROTOCOL, "secrets": {"ok": ok, "reason": status, "findings": findings[:20]}})
         reply = lines.recv() or {}
         if reply.get("type") == "sync":
             os.sync()
@@ -187,10 +234,13 @@ def main() -> int:
         log(started_with(reply.get("parent")))
         if reply.get("reason"):
             log(f"not saved now: {reply['reason']}")
-        if not ok:
+        if status == "secrets":
             summary("**Checkpoint:** nothing was saved, because secrets are used before this step:\n\n"
                     + "\n".join(f"- {finding}" for finding in findings[:20])
                     + "\n\nMove steps that need secrets after the checkpoint step.")
+        elif status == "unverified":
+            summary("**Checkpoint:** nothing was saved, because this job's workflow could not be checked for "
+                    "secrets before this step:\n\n" + "\n".join(f"- {finding}" for finding in findings[:20]))
     elif kind == "failed":
         log(f"the setup could not be saved ({reply.get('reason', 'no reason given')}); the job goes on")
     else:

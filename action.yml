@@ -29,8 +29,17 @@ runs:
         INPUT_TOKEN: ${{ inputs.token }}
         INPUT_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
       run: |
-        if command -v python3 >/dev/null 2>&1; then
-          python3 "$GITHUB_ACTION_PATH/checkpoint.py"
+        # Prefer an interpreter with a YAML parser: a setup step earlier in the job may have put
+        # a Python without one first on PATH, and without one the step cannot check for secrets.
+        py=""
+        for candidate in /usr/bin/python3 python3; do
+          if command -v "$candidate" >/dev/null 2>&1; then
+            [ -z "$py" ] && py="$candidate"
+            if "$candidate" -c 'import yaml' >/dev/null 2>&1; then py="$candidate"; break; fi
+          fi
+        done
+        if [ -n "$py" ]; then
+          "$py" "$GITHUB_ACTION_PATH/checkpoint.py"
         else
           echo "checkpoint: not running on Vitko Runners: nothing to do"
         fi

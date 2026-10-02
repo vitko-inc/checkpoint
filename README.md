@@ -5,7 +5,7 @@ Put `vitko-inc/checkpoint@v1` right after your job's setup steps. On [Vitko Runn
 ```yaml
 jobs:
   test:
-    runs-on: vitko-runners
+    runs-on: vitko-ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4

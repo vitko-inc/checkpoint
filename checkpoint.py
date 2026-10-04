@@ -198,6 +198,16 @@ def started_with(saved) -> str:
     return f"this job started with the setup saved from {str(saved['commit'])[:12]}{at}"
 
 
+def own_setup(reply) -> str | None:
+    """Whether this job started with its own saved setup, as the runner host says: "hit: ...",
+    "miss: ..." with the reason, or "not known ...". None from a host that does not say."""
+    setup = reply.get("setup") if isinstance(reply, dict) else None
+    line = setup.get("line") if isinstance(setup, dict) else None
+    if not isinstance(line, str) or not line or len(line) > 400 or any(ord(c) < 32 for c in line):
+        return None
+    return line
+
+
 # ---- the exchange ----------------------------------------------------------------------------------
 
 def main() -> int:
@@ -227,11 +237,13 @@ def main() -> int:
         sock.close()
     kind = reply.get("type")
     if kind == "captured":
+        if own_setup(reply):
+            log(own_setup(reply))
         commit = str(reply.get("commit", ""))[:12]
         log(f"setup saved from {commit}; later jobs of this repository start with it")
         summary(f"**Checkpoint:** setup saved from `{commit}`. Later jobs of this repository start with it.")
     elif kind == "noted":
-        log(started_with(reply.get("parent")))
+        log(own_setup(reply) or started_with(reply.get("parent")))
         if reply.get("reason"):
             log(f"not saved now: {reply['reason']}")
         if status == "secrets":

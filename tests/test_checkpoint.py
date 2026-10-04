@@ -179,6 +179,16 @@ def main():
         if "fresh runner" not in checkpoint.started_with(nothing):
             print(f"FAIL: started_with({nothing!r})")
             sys.exit(1)
+    hit = {"type": "noted", "parent": {"commit": "0123456789abcdef0123456789abcdef01234567"},
+           "setup": {"hit": True, "line": "hit: this job started with its own saved setup, saved from 0123456789ab"}}
+    if checkpoint.own_setup(hit) != hit["setup"]["line"]:
+        print(f"FAIL: own_setup hit: {checkpoint.own_setup(hit)!r}")
+        sys.exit(1)
+    for bad in ({}, {"setup": None}, {"setup": {"line": ""}}, {"setup": {"line": "x\n::error::y"}},
+                {"setup": {"line": "x" * 401}}, {"setup": {"line": 7}}, "x", None):
+        if checkpoint.own_setup(bad) is not None:
+            print(f"FAIL: own_setup({bad!r}) should be None")
+            sys.exit(1)
     print("ALL CHECKPOINT CHECKS PASSED")
 
 

@@ -32,8 +32,10 @@ Your workspace is not saved. `actions/checkout` fetches it fresh in every job an
 ## Secrets
 
 - **Steps before the checkpoint must not use secrets**, other than `GITHUB_TOKEN`. That covers the workflow's and the job's `env` as well. If they do, nothing is saved: the step lists what it found in the job summary, and the job continues normally. Move steps that need secrets, such as registry logins or deploy keys, after the checkpoint.
-- Before anything is saved, the runner removes the job's own runner state and common credential files (Docker, npm, yarn, pip, `.netrc`, git credential helpers and headers, the GitHub, AWS, Google Cloud and Azure CLIs, kubectl, and private SSH keys). If anything that looks like a credential is still found, nothing is saved.
-- **Anything your steps write to disk before the checkpoint is saved, and later jobs of the repository start with it, including pull request jobs.** The runner can't recognise every credential: for example, a token from a cloud or Vault login that uses OIDC, written to a file of the tool's or your own choosing. Don't log in to clouds, registries or secret stores before the checkpoint.
+- Before anything is saved, the runner removes the job's own runner state, its Docker containers, and common credential files: Docker, npm, yarn, pip, `.netrc`, git credential helpers and headers, the GitHub, AWS, Google Cloud and Azure CLIs, kubectl, Vault, Terraform, Pulumi, Helm, and private SSH keys.
+- The step passes this job's GitHub tokens (`GITHUB_TOKEN` and the runtime and OIDC request tokens) to the runner over its local channel. If any of them (with `vitko-inc/checkpoint` v1.1.0 or later), or anything shaped like a known credential, is still found in what would be saved, nothing is saved.
+- A saved setup never changes the runner's own software, its users and permissions, its trusted certificates, or its shell and Git configuration.
+- **Anything else your steps write to disk before the checkpoint is saved, and later jobs of the repository start with it, including pull request jobs.** The runner can't recognise a credential your steps make themselves, for example a token from a cloud or Vault login that uses OIDC, written to a file of your own choosing. Don't log in to clouds, registries or secret stores before the checkpoint.
 - `GITHUB_TOKEN` and the job's OIDC tokens stop working when the job ends. Credentials made from them, such as cloud session tokens, may not.
 
 ## Inputs

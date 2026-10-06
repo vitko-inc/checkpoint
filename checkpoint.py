@@ -208,6 +208,19 @@ def own_setup(reply) -> str | None:
     return line
 
 
+def job_token_values() -> list[str]:
+    """The tokens GitHub gave this job (GITHUB_TOKEN, the runtime and OIDC request tokens), sent to
+    the runner host over its local channel so it can check that none of them is in the saved setup.
+    They are never printed, and they stop working when the job ends."""
+    names = ("INPUT_TOKEN", "ACTIONS_RUNTIME_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_TOKEN")
+    values = []
+    for name in names:
+        value = os.environ.get(name, "")
+        if 20 <= len(value) <= 8192 and value.isprintable() and value not in values:
+            values.append(value)
+    return values
+
+
 # ---- the exchange ----------------------------------------------------------------------------------
 
 def main() -> int:
@@ -224,7 +237,8 @@ def main() -> int:
     try:
         sock.settimeout(timeout)
         lines = Lines(sock)
-        lines.send({"type": "hello", "protocol": PROTOCOL, "secrets": {"ok": ok, "reason": status, "findings": findings[:20]}})
+        lines.send({"type": "hello", "protocol": PROTOCOL, "secrets": {"ok": ok, "reason": status, "findings": findings[:20]},
+                    "values": job_token_values()})
         reply = lines.recv() or {}
         if reply.get("type") == "sync":
             os.sync()

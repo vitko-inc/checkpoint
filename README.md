@@ -36,6 +36,7 @@ Nothing secret is saved.
 - **Steps before the checkpoint must not use secrets**, other than `GITHUB_TOKEN`. That covers the workflow's and the job's `env` as well. If they do, nothing is saved: the step lists what it found in the job summary, and the job continues normally. Move steps that need secrets, such as registry logins or deploy keys, after the checkpoint.
 - Before anything is saved, the runner removes common credential files (Docker, npm, yarn, pip, `.netrc`, git credential helpers and headers, the GitHub, AWS, Google Cloud and Azure CLIs, kubectl, and private SSH keys) and the job's own runner state.
 - If anything that looks like a credential is still found, nothing is saved.
+- The step passes this job's GitHub tokens (`GITHUB_TOKEN` and the job's runtime and OIDC request tokens) to the runner host over the runner's local channel, never over the network. If any of them is found in what would be saved, nothing is saved.
 - `GITHUB_TOKEN` stops working when the job ends.
 
 ## Inputs

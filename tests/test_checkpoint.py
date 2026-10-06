@@ -114,6 +114,15 @@ def check(name, ok, expected_ok):
 
 
 def main():
+    os.environ.update({"INPUT_TOKEN": "ghs_" + "a" * 36, "ACTIONS_RUNTIME_TOKEN": "", "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "short"})
+    values = checkpoint.job_token_values()
+    if values != ["ghs_" + "a" * 36]:
+        print(f"FAIL: token values: {len(values)} reported")
+        sys.exit(1)
+    os.environ["ACTIONS_RUNTIME_TOKEN"] = "ghs_" + "a" * 36
+    if len(checkpoint.job_token_values()) != 1:
+        print("FAIL: a repeated token is reported twice")
+        sys.exit(1)
     ok, findings = checkpoint.secrets_before_checkpoint(CLEAN, "test")
     check("secrets after the checkpoint and GITHUB_TOKEN are fine", ok, True)
     for name, text in [("a step before", BEFORE), ("job env", JOB_ENV), ("toJSON(secrets)", ALL),

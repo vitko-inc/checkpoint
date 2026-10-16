@@ -1,6 +1,7 @@
-# Vitko Runners checkpoint
+# Vitko Runners checkpoint: warm starts for GitHub Actions jobs
 
-Put `vitko-inc/checkpoint@v1` right after your job's setup steps. On [Vitko Runners](https://runners.vitko.inc), runs of your default branch save the setup done before it, and later jobs of the repository start with that setup already in place. Their setup steps still run, but find the work done and finish quickly. On any other runner the step does nothing, so the same workflow runs everywhere.
+Skip reinstalling dependencies on every GitHub Actions run: jobs start with your toolchains,
+packages and Docker images already in place. Put `vitko-inc/checkpoint@v1` right after your job's setup steps. On [Vitko Runners](https://runners.vitko.inc), runs of your default branch save the setup done before it, and later jobs of the repository start with that setup already in place. Their setup steps still run, but find the work done and finish quickly. On any other runner the step does nothing, so the same workflow runs everywhere.
 
 ```yaml
 jobs:

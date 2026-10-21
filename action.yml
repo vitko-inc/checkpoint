@@ -1,8 +1,5 @@
 name: Vitko Runners checkpoint
-description: >-
-  Marks the end of your job's setup. On Vitko Runners, runs of your default branch save the setup
-  done before this step, and later jobs start with it, so their setup steps finish quickly. On
-  other runners it does nothing.
+description: Save your job's setup so later jobs on Vitko Runners start with it in place; does nothing on other runners.
 author: Vitko Runners
 branding:
   icon: fast-forward
